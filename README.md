@@ -27,8 +27,8 @@ Session Recharge gives Claude a structured, decision-focused snapshot of the ses
                   │
     PreCompact hook fires
                   │
-    extract.sh reads the JSONL transcript
-    and sends it to Haiku for structured extraction
+    extract.sh reads user prompts + assistant summaries
+    from the JSONL transcript and sends them to Haiku
                   │
     Haiku produces a focused summary:
     • Session goal
@@ -77,17 +77,17 @@ If a session compacts multiple times, each extraction builds on the previous one
 
 ## Token Usage & Cost
 
-There's a minor token cost per extraction and a small context footprint (~300-1,500 tokens) after injection. Here's the breakdown:
+The extraction only sends **user prompts** and **assistant summaries** (text-only responses, no tool calls) to Haiku. This is typically a fraction of the full transcript — tool-heavy sessions where the assistant makes dozens of tool calls produce very little extractable text. The result is that even long sessions usually fit within Haiku's context window.
 
 | Phase | Tokens | Notes |
 |-------|--------|-------|
-| **Extraction input** | ~15-20K | 60K chars of transcript + prompt |
+| **Extraction input** | Varies | User prompts + assistant summaries only (tool calls skipped) |
 | **Extraction output** | ~300-1,500 | Structured summary |
 | **Injection** | ~300-1,500 | Added to Claude's post-compact context |
 | **Model** | Haiku | Via `claude -p` (uses your CC subscription) |
-| **Time added to compact** | ~25-40 sec | Haiku call is the bottleneck |
+| **Time added to compact** | Varies | Scales with input size — Haiku call is the bottleneck |
 
-**Billing:** The extraction runs via `claude -p --model haiku` using your Claude Code subscription. Each extraction consumes ~15-20K input + ~300-1,500 output Haiku tokens, which count toward your subscription's token activity.
+**Billing:** The extraction runs via `claude -p --model haiku` using your Claude Code subscription. Token usage depends on how much user + assistant summary text exists — tool-heavy sessions are cheap, discussion-heavy sessions cost more. Output is always ~300-1,500 tokens.
 
 ## Installation
 
@@ -131,7 +131,7 @@ session-recharge/
 │   └── plugin.json           # Plugin manifest
 ├── hooks/
 │   ├── hooks.json            # Hook event bindings
-│   ├── extract.sh            # PreCompact: transcript → Haiku → memory file
+│   ├── extract.sh            # PreCompact: user prompts + summaries → Haiku → memory file
 │   ├── inject.sh             # SessionStart: memory file → Claude context
 │   └── prompt-refresh.sh     # UserPromptSubmit: trigger-based extraction + injection
 ├── commands/
@@ -206,7 +206,7 @@ Or within a Claude Code session, use `/session-recharge` to have Claude re-extra
 | **Corrections?** | No | Sometimes | Rarely | Yes (explicit section) |
 | **Format** | Freeform | Freeform | Narrative prose | Structured headings |
 | **Survives compact?** | Always loaded | Always loaded | Replaces conversation | Injected post-compact |
-| **Cost** | Free | Free | Free | ~15-20K Haiku tokens |
+| **Cost** | Free | Free | Free | Varies (Haiku tokens) |
 
 They all complement each other. CLAUDE.md sets the rules, auto-memory builds the user profile, CC's summary preserves the broad narrative, and Session Recharge captures the session-specific decisions and state that keep Claude on track.
 

@@ -22,10 +22,10 @@
 #     ~/.claude/session-memories/{session_id}.md
 #
 # TOKEN USAGE (per extraction):
-#   Input:  ~15-20K tokens (60K chars of transcript + prompt instructions)
+#   Input:  Up to ~150K tokens (600K chars of transcript + prompt instructions)
 #   Output: ~300-1500 tokens (structured summary)
 #   Model:  Haiku via `claude -p` (counts toward your CC subscription token activity)
-#   Time:   ~25-40 seconds added to compact (Haiku call is the bottleneck)
+#   Time:   Varies with transcript size — Haiku call is the bottleneck
 #
 # INCREMENTAL:
 #   If a memory file already exists for this session, the previous extraction
@@ -42,7 +42,7 @@ set -euo pipefail
 MEMORY_DIR="$HOME/.claude/session-memories"
 LOG_FILE="$MEMORY_DIR/debug.log"
 MAX_LOG_BYTES=1048576                    # 1 MiB — rotate when exceeded
-MAX_CONVERSATION_CHARS=60000             # Haiku context budget (~15-20K tokens)
+MAX_CONVERSATION_CHARS=600000            # ~150K tokens — uses most of Haiku's 200K context window
 MAX_BLOCK_CHARS=1500                     # Truncate individual message blocks
 CLAUDE_BUDGET="1.00"                     # Max USD per extraction call
 
@@ -166,14 +166,17 @@ MEMORY_FILE="$MEMORY_DIR/${SESSION_ID}.md"
 # Each line has a "type" field (user, assistant, system, etc.) and a
 # "message.content" field that's either a string or array of content blocks.
 #
-# We extract only user and assistant text blocks, skipping:
-#   - Tool calls and tool results (noise, already reflected in conversation)
-#   - System reminders and IDE injections (internal CC metadata)
-#   - Very long blocks (>1500 chars) are truncated to save context budget
+# We extract:
+#   - ALL user messages (intent, decisions, corrections)
+#   - Assistant text-only messages (summaries/status updates — no tool_use)
 #
-# The result is capped at MAX_CONVERSATION_CHARS (~60K) to fit Haiku's
-# context window. We keep the LAST portion (most recent conversation)
-# since that's most relevant for continuity.
+# We skip:
+#   - Assistant messages containing tool_use blocks (the work, not the summary)
+#   - System reminders and IDE injections (internal CC metadata)
+#   - Thinking blocks (internal reasoning)
+#
+# This keeps the input small enough to fit most full sessions within
+# Haiku's context window, while capturing intent + outcomes.
 
 CONVERSATION=$(python3 -c "
 import json, sys
@@ -201,6 +204,13 @@ with open(sys.argv[1]) as f:
         if isinstance(content, str):
             content = [{'type': 'text', 'text': content}]
 
+        block_types = {b.get('type') for b in content if isinstance(b, dict)}
+
+        # Skip assistant messages that contain tool_use — those are the work,
+        # not the summary. Text-only assistant messages are status updates.
+        if msg_type == 'assistant' and 'tool_use' in block_types:
+            continue
+
         for block in content:
             if not isinstance(block, dict):
                 continue
@@ -218,8 +228,7 @@ with open(sys.argv[1]) as f:
 
             role = 'USER' if msg_type == 'user' else 'ASSISTANT'
 
-            # Truncate very long blocks — these are usually embedded tool
-            # outputs that don't add much to the conversation summary
+            # Truncate very long blocks to save context budget
             if len(text) > MAX_BLOCK:
                 text = text[:MAX_BLOCK] + '... [truncated]'
 
