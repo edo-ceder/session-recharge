@@ -1,0 +1,10 @@
+{
+  "name": "session-recharge",
+  "description": "Survives context compaction by extracting structured session memory before compact and re-injecting it after. Uses Haiku to capture goals, decisions, state, blockers, and user preferences so Claude never loses the plot in long sessions.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Edo Ceder"
+  },
+  "repository": "https://github.com/edo-ceder/session-recharge",
+  "license": "MIT"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "session-recharge",
+  "metadata": {
+    "description": "Plugins for improving Claude Code's session context retention"
+  },
+  "owner": {
+    "name": "Edo Ceder"
+  },
+  "plugins": [
+    {
+      "name": "session-recharge",
+      "source": "./",
+      "description": "Fights session drift by capturing decisions, state, and corrections — automatically around compaction, or manually when needed."
+    }
+  ]
+}
