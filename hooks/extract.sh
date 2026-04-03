@@ -36,6 +36,7 @@
 # =============================================================================
 
 set -euo pipefail
+umask 077  # Memory files may contain sensitive conversation content
 
 # ---------------------------------------------------------------------------
 # Configuration

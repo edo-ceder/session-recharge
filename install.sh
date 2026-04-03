@@ -47,9 +47,16 @@ if not has_hook(hooks.get('PreCompact', []), 'session-memory/extract.sh'):
 if not has_hook(hooks.get('SessionStart', []), 'session-memory/inject.sh'):
     hooks.setdefault('SessionStart', []).append(session_start)
 
-with open(path, 'w') as f:
-    json.dump(settings, f, indent=4)
-    f.write('\n')
+import tempfile
+tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path) or '.', suffix='.tmp')
+try:
+    with os.fdopen(tmp_fd, 'w') as f:
+        json.dump(settings, f, indent=4)
+        f.write('\n')
+    os.replace(tmp_path, path)
+except:
+    os.unlink(tmp_path)
+    raise
 " "$SETTINGS"
 
 echo "Done! Session Recharge is now active."
