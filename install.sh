@@ -54,8 +54,11 @@ try:
         json.dump(settings, f, indent=4)
         f.write('\n')
     os.replace(tmp_path, path)
-except:
-    os.unlink(tmp_path)
+except Exception:
+    try:
+        os.unlink(tmp_path)
+    except OSError:
+        pass
     raise
 " "$SETTINGS"
 

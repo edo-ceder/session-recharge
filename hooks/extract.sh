@@ -369,6 +369,8 @@ RESULT=$(env -u CLAUDECODE "$CLAUDE_BIN" -p \
 
 if [ "$CLAUDE_EXIT" -ne 0 ]; then
   log "ERROR: claude -p failed with exit code $CLAUDE_EXIT"
+  # Exit 0 intentionally — extraction failure should not block compaction.
+  # The watermark is not advanced, so these lines will be retried next time.
 fi
 log "claude -p returned ${#RESULT} chars"
 
