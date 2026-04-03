@@ -1,10 +1,10 @@
 # Session Recharge
 
-A Claude Code plugin that fights session drift by capturing decisions, state, and corrections — automatically around compaction, or manually when you need Claude to refocus.
+Preserves important architectural decisions and user requests that get lost during compaction and long sessions. Automatically extracts structured session memory (goals, decisions, state, blockers, corrections) before compaction and re-injects it after. Can also be triggered mid-session anytime you want Claude to refocus on what's been decided.
 
 ## The Problem
 
-Claude Code drifts during long sessions. Important session-specific architectural decisions get lost, `/compact` makes it worse, and neither `CLAUDE.md` nor `memory.md` help — they aren't designed for this.
+Important architectural decisions and user requests get lost during compaction and long sessions. Neither `CLAUDE.md` nor auto-memory help — they aren't designed for session-specific context.
 
 - **CLAUDE.md** holds project-level rules, not "we agreed to use approach X because of Y"
 - **Auto-memory** captures user preferences and project facts, not session-specific decisions
@@ -12,11 +12,11 @@ Claude Code drifts during long sessions. Important session-specific architectura
 
 ## What This Plugin Does
 
-Session Recharge gives Claude a structured, decision-focused snapshot of the session that survives drift and compaction.
+Session Recharge gives Claude a structured, decision-focused snapshot of the session that survives compaction and drift.
 
-**Automatically** — hooks into the compaction lifecycle to extract memory before compact and re-inject it after.
+**Automatically** — hooks into the compaction lifecycle to extract memory before compact and re-inject it after. Architectural decisions from hour 1 survive through compact 5.
 
-**Manually** — use `/session-recharge` when Claude is drifting, contradicting earlier decisions, or before a major code revision to re-anchor on what's been decided and what constraints apply.
+**Manually** — type `/session-recharge` when Claude is drifting, contradicting earlier decisions, or before a major code change. Claude re-extracts and displays what it remembers so you can verify and correct.
 
 ## How It Works
 
@@ -47,7 +47,8 @@ Session Recharge gives Claude a structured, decision-focused snapshot of the ses
     inject.sh reads the memory file
     and outputs it to Claude's fresh context
                   │
-    Claude acknowledges what it remembers ✓
+    Claude's next response is informed by
+    the injected session memory ✓
 
 
     ┌─────────────────────────────────┐
@@ -56,14 +57,14 @@ Session Recharge gives Claude a structured, decision-focused snapshot of the ses
                   │
     User types /session-recharge
                   │
-    UserPromptSubmit hook fires BEFORE Claude processes the prompt
+    Claude runs extract.sh directly via Bash
+    (same extraction pipeline as PreCompact)
                   │
-    prompt-refresh.sh detects the trigger,
-    runs the same extraction pipeline,
-    and injects the result into Claude's context
+    Claude reads the resulting memory file
+    and shows a structured summary:
+    • Goal, Where we left off, Blockers, Corrections
                   │
-    Claude sees fresh memory already in context —
-    no tool calls needed, just acknowledges ✓
+    User verifies the summary is correct ✓
                   │
     Use when:
     • Claude is drifting or contradicting earlier decisions
@@ -77,65 +78,67 @@ If a session compacts multiple times, each extraction builds on the previous one
 
 ## Token Usage & Cost
 
-The extraction only sends **user prompts** and **assistant summaries** (text-only responses, no tool calls) to Haiku. This is typically a fraction of the full transcript — tool-heavy sessions where the assistant makes dozens of tool calls produce very little extractable text. The result is that even long sessions usually fit within Haiku's context window.
+Each extraction only sends **new messages since the last extraction** — user prompts and assistant text-only responses (no tool calls, no thinking blocks). Earlier decisions are already captured in the existing memory file, which Haiku merges with the new content. This keeps input small even in long sessions: tool-heavy stretches produce very little extractable text.
 
 | Phase | Tokens | Notes |
 |-------|--------|-------|
-| **Extraction input** | Varies | User prompts + assistant summaries only (tool calls skipped) |
+| **Extraction input** | Varies | New messages since last extraction only (user prompts + assistant summaries, tool calls skipped) |
 | **Extraction output** | ~300-1,500 | Structured summary |
 | **Injection** | ~300-1,500 | Added to Claude's post-compact context |
 | **Model** | Haiku | Via `claude -p` (uses your CC subscription) |
-| **Time added to compact** | Varies | Scales with input size — Haiku call is the bottleneck |
+| **Time added to compact** | Varies | Scales with new content since last extraction — Haiku call is the bottleneck |
 
-**Billing:** The extraction runs via `claude -p --model haiku` using your Claude Code subscription. Token usage depends on how much user + assistant summary text exists — tool-heavy sessions are cheap, discussion-heavy sessions cost more. Output is always ~300-1,500 tokens.
+**Billing:** The extraction runs via `claude -p --model haiku` using your Claude Code subscription. Token usage depends on how much user + assistant summary text exists — tool-heavy sessions are cheap, discussion-heavy sessions cost more. Output is always ~300-1,500 tokens. A typical extraction costs ~$0.04. A per-call safety cap of $1.00 (`--max-budget-usd`) prevents runaway costs.
 
 ## Installation
 
-### From GitHub (recommended)
+In Claude Code, run:
 
-```bash
-# In Claude Code, run:
+```
 /plugin marketplace add edo-ceder/session-recharge
 /plugin install session-recharge
 ```
 
-### Manual Installation
+That's it. Hooks and the `/session-recharge` command are active immediately.
+
+<details>
+<summary>Manual install (if not using the plugin system)</summary>
 
 ```bash
-# Clone the repo
 git clone https://github.com/edo-ceder/session-recharge.git
-
-# Test locally
-claude --plugin-dir ./session-recharge
+cd session-recharge && ./install.sh
 ```
+
+The installer copies hooks and the command to `~/.claude/` and merges hook config into your `settings.json`.
+</details>
 
 ### Requirements
 
 - **Claude Code** (with active subscription — Haiku calls use your CC auth)
-- **python3** (for JSONL transcript parsing)
-- **jq** (for JSON input parsing from hooks)
+- **python3** (for JSONL transcript parsing and hook JSON input parsing)
 
-Both `python3` and `jq` are pre-installed on most macOS and Linux systems. The plugin checks for them on startup and gives clear error messages if missing.
+`python3` is pre-installed on most macOS and Linux systems. The plugin checks for it on startup and gives a clear error message if missing.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/session-recharge` | Re-summarize the full session and re-inject fresh memory. Use before critical decisions or when Claude is drifting. |
+| `/session-recharge` | Run a fresh extraction, read the result, and display a structured summary. Use before critical decisions or when Claude is drifting. |
 
 ## Files
 
 ```
 session-recharge/
+├── install.sh                  # One-command installer
 ├── .claude-plugin/
-│   └── plugin.json           # Plugin manifest
+│   ├── plugin.json             # Plugin manifest
+│   └── marketplace.json        # Marketplace listing metadata
 ├── hooks/
-│   ├── hooks.json            # Hook event bindings
-│   ├── extract.sh            # PreCompact: user prompts + summaries → Haiku → memory file
-│   ├── inject.sh             # SessionStart: memory file → Claude context
-│   └── prompt-refresh.sh     # UserPromptSubmit: trigger-based extraction + injection
+│   ├── hooks.json              # Hook event bindings
+│   ├── extract.sh              # PreCompact: user prompts + summaries → Haiku → memory file
+│   └── inject.sh               # SessionStart: memory file → Claude context
 ├── commands/
-│   └── session-recharge.md  # /session-recharge (extract + inject)
+│   └── session-recharge.md     # /session-recharge command (runs extract + read + display)
 └── README.md
 ```
 
@@ -153,6 +156,7 @@ Each file is a standalone markdown document with this structure:
 <!-- Session: 80b8df76-c7ae-40c9-bd43-7eeff2422644 -->
 <!-- Updated: 2026-03-14T21:59:43Z -->
 <!-- Source: 80b8df76-c7ae-40c9-bd43-7eeff2422644.jsonl -->
+<!-- LastLine: 847 -->
 
 ### Session Goal
 User is refining the v3 orchestrator prompts to fix module decomposition...
@@ -214,7 +218,7 @@ They all complement each other. CLAUDE.md sets the rules, auto-memory builds the
 
 - Memory files are stored locally at `~/.claude/session-memories/`
 - Conversation transcripts are read from `~/.claude/projects/` (CC's own storage)
-- Transcript content is sent to Haiku via `claude -p` — same auth and privacy model as your normal CC usage
+- Transcript content is sent to Haiku via `claude -p --tools ""` — uses your CC subscription auth. `--tools ""` disables all tools at the system level (enforced, not just instructed), so the call can only generate text
 - No data leaves your machine except through the standard Claude API (via CC)
 - Debug logs at `~/.claude/session-memories/debug.log` (auto-rotated at 1 MB)
 
@@ -227,6 +231,8 @@ The scripts include protections for community distribution:
 - **Temp file isolation** (private directory, cleanup trap)
 - **Dependency checks** (fails fast with clear errors)
 - **Prompt injection mitigation** (XML-tagged transcript boundaries)
+- **Tool use disabled** (`--tools ""` on the inner `claude -p` call — disables all tools at the system level, so even a successful prompt injection cannot trigger Bash, file writes, or any other tool. No `--dangerously-skip-permissions` needed because there are no tools to approve)
+- **Budget cap** ($1.00 per extraction via `--max-budget-usd` — ~25x the typical cost, acts as a safety valve)
 - **Log rotation** (prevents unbounded disk growth)
 
 ## License

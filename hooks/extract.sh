@@ -22,10 +22,12 @@
 #     ~/.claude/session-memories/{session_id}.md
 #
 # TOKEN USAGE (per extraction):
-#   Input:  Up to ~150K tokens (600K chars of transcript + prompt instructions)
+#   Input:  Only new messages since last extraction (user prompts + assistant
+#           text-only responses). Earlier decisions are preserved via the
+#           previous memory file fed as context.
 #   Output: ~300-1500 tokens (structured summary)
 #   Model:  Haiku via `claude -p` (counts toward your CC subscription token activity)
-#   Time:   Varies with transcript size — Haiku call is the bottleneck
+#   Time:   Varies with new content since last extraction — Haiku call is the bottleneck
 #
 # INCREMENTAL:
 #   If a memory file already exists for this session, the previous extraction
@@ -42,7 +44,6 @@ set -euo pipefail
 MEMORY_DIR="$HOME/.claude/session-memories"
 LOG_FILE="$MEMORY_DIR/debug.log"
 MAX_LOG_BYTES=1048576                    # 1 MiB — rotate when exceeded
-MAX_CONVERSATION_CHARS=600000            # ~150K tokens — uses most of Haiku's 200K context window
 MAX_BLOCK_CHARS=1500                     # Truncate individual message blocks
 CLAUDE_BUDGET="1.00"                     # Max USD per extraction call
 
@@ -67,13 +68,11 @@ log "=== extract.sh started ==="
 # Dependency checks — fail fast with clear errors
 # ---------------------------------------------------------------------------
 
-for cmd in jq python3; do
-  if ! command -v "$cmd" &>/dev/null; then
-    log "ERROR: required command '$cmd' not found in PATH"
-    echo "Error: session-recharge plugin requires '$cmd' to be installed" >&2
-    exit 1
-  fi
-done
+if ! command -v python3 &>/dev/null; then
+  log "ERROR: required command 'python3' not found in PATH"
+  echo "Error: session-recharge plugin requires 'python3' to be installed" >&2
+  exit 1
+fi
 
 # Resolve claude binary path.
 # CLAUDE_BIN env var allows override (e.g., for non-standard installs).
@@ -112,8 +111,8 @@ if [ -z "$SESSION_ID" ] && [ ! -t 0 ]; then
   # The JSON payload includes session_id, transcript_path, cwd, and metadata.
   INPUT=$(cat)
   log "stdin JSON: $INPUT"
-  SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty')
-  TRANSCRIPT_PATH=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty')
+  SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('session_id',''))")
+  TRANSCRIPT_PATH=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('transcript_path',''))")
 fi
 
 log "SESSION_ID=$SESSION_ID"
@@ -160,6 +159,26 @@ esac
 MEMORY_FILE="$MEMORY_DIR/${SESSION_ID}.md"
 
 # ---------------------------------------------------------------------------
+# Load existing memory (if any) for incremental updates
+# ---------------------------------------------------------------------------
+# When a session has been compacted before, we already have a memory file.
+# Feeding the previous extraction to Haiku lets it merge and update rather
+# than starting fresh — preserving decisions from earlier in the session
+# that may no longer appear in the new transcript segment.
+#
+# The LastLine watermark tracks which JSONL line we processed up to last
+# time, so we only extract new messages on subsequent runs.
+
+EXISTING_MEMORY=""
+LAST_LINE=0
+if [ -f "$MEMORY_FILE" ]; then
+  EXISTING_MEMORY=$(cat "$MEMORY_FILE")
+  LAST_LINE=$(sed -n 's/<!-- LastLine: \([0-9]*\) -->/\1/p' "$MEMORY_FILE")
+  LAST_LINE="${LAST_LINE:-0}"
+  log "Loaded existing memory ($(printf '%s' "$EXISTING_MEMORY" | wc -c | tr -d ' ') chars, last line: $LAST_LINE)"
+fi
+
+# ---------------------------------------------------------------------------
 # Extract conversation text from JSONL transcript
 # ---------------------------------------------------------------------------
 # The transcript is a JSONL file with one JSON object per line.
@@ -175,23 +194,25 @@ MEMORY_FILE="$MEMORY_DIR/${SESSION_ID}.md"
 #   - System reminders and IDE injections (internal CC metadata)
 #   - Thinking blocks (internal reasoning)
 #
-# This keeps the input small enough to fit most full sessions within
-# Haiku's context window, while capturing intent + outcomes.
+# Only new messages since the last extraction are processed (starting from
+# LAST_LINE). Earlier decisions are preserved via the existing memory file.
 
 CONVERSATION=$(python3 -c "
 import json, sys
 
-MAX_CHARS = int(sys.argv[2])
+START_LINE = int(sys.argv[2])
 MAX_BLOCK = int(sys.argv[3])
 
 lines = []
 with open(sys.argv[1]) as f:
-    for line in f:
-        line = line.strip()
-        if not line:
+    for i, raw_line in enumerate(f):
+        if i < START_LINE:
+            continue
+        raw_line = raw_line.strip()
+        if not raw_line:
             continue
         try:
-            obj = json.loads(line)
+            obj = json.loads(raw_line)
         except (json.JSONDecodeError, ValueError):
             continue
 
@@ -234,34 +255,18 @@ with open(sys.argv[1]) as f:
 
             lines.append(f'{role}: {text}')
 
-# Join with separator and keep the tail (most recent conversation)
-joined = '\n---\n'.join(lines)
-if len(joined) > MAX_CHARS:
-    joined = joined[-MAX_CHARS:]
+print('\n---\n'.join(lines))
+" "$TRANSCRIPT_PATH" "$LAST_LINE" "$MAX_BLOCK_CHARS" 2>/dev/null)
 
-print(joined)
-" "$TRANSCRIPT_PATH" "$MAX_CONVERSATION_CHARS" "$MAX_BLOCK_CHARS" 2>/dev/null)
+# Record the transcript line count as a watermark for the next extraction
+TOTAL_LINES=$(wc -l < "$TRANSCRIPT_PATH" | tr -d ' ')
 
 if [ -z "$CONVERSATION" ]; then
   log "WARNING: no conversation content extracted from transcript"
   exit 0
 fi
 
-log "Extracted $(printf '%s' "$CONVERSATION" | wc -c | tr -d ' ') chars of conversation"
-
-# ---------------------------------------------------------------------------
-# Load existing memory (if any) for incremental updates
-# ---------------------------------------------------------------------------
-# When a session has been compacted before, we already have a memory file.
-# Feeding the previous extraction to Haiku lets it merge and update rather
-# than starting fresh — preserving decisions from earlier in the session
-# that may no longer appear in the truncated transcript.
-
-EXISTING_MEMORY=""
-if [ -f "$MEMORY_FILE" ]; then
-  EXISTING_MEMORY=$(cat "$MEMORY_FILE")
-  log "Loaded existing memory ($(printf '%s' "$EXISTING_MEMORY" | wc -c | tr -d ' ') chars)"
-fi
+log "Extracted $(printf '%s' "$CONVERSATION" | wc -c | tr -d ' ') chars of conversation (lines $LAST_LINE-$TOTAL_LINES)"
 
 # ---------------------------------------------------------------------------
 # Build extraction prompt
@@ -350,12 +355,15 @@ log "Calling claude -p --model haiku..."
 # Call Claude via CC's own CLI — uses existing CC subscription auth.
 # CLAUDECODE env var must be unset to avoid "nested session" blocking
 # (CC prevents launching claude inside another claude session).
+# --tools "" disables all tools — enforces text-only generation at the
+# system level, not just via prompt instructions. This closes the prompt
+# injection → tool use attack surface entirely.
 CLAUDE_EXIT=0
 RESULT=$(env -u CLAUDECODE "$CLAUDE_BIN" -p \
   --model haiku \
+  --tools "" \
   --max-budget-usd "$CLAUDE_BUDGET" \
   --no-session-persistence \
-  --dangerously-skip-permissions \
   < "$PROMPT_FILE" 2>>"$LOG_FILE") || CLAUDE_EXIT=$?
 
 log "claude -p exited with code $CLAUDE_EXIT, returned ${#RESULT} chars"
@@ -382,6 +390,7 @@ if [ -n "$RESULT" ]; then
     printf '<!-- Session: %s -->\n' "$SESSION_ID"
     printf '<!-- Updated: %s -->\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf '<!-- Source: %s -->\n' "$(basename "$TRANSCRIPT_PATH")"
+    printf '<!-- LastLine: %s -->\n' "$TOTAL_LINES"
     printf '\n'
     printf '%s\n' "$RESULT"
   } > "$MEMORY_FILE"

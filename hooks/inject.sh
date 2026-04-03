@@ -59,6 +59,16 @@ log() {
 log "=== inject.sh started ==="
 
 # ---------------------------------------------------------------------------
+# Dependency checks
+# ---------------------------------------------------------------------------
+
+if ! command -v python3 &>/dev/null; then
+  log "ERROR: required command 'python3' not found in PATH"
+  echo "Error: session-recharge plugin requires 'python3' to be installed" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Parse input — args (manual) or stdin JSON (hook)
 # ---------------------------------------------------------------------------
 
@@ -67,7 +77,7 @@ SESSION_ID="${1:-}"
 if [ -z "$SESSION_ID" ] && [ ! -t 0 ]; then
   INPUT=$(cat)
   log "stdin JSON: $INPUT"
-  SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty')
+  SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('session_id',''))")
 fi
 
 log "SESSION_ID=$SESSION_ID"
@@ -132,10 +142,17 @@ cat <<'FOOTER'
 
 === END SESSION MEMORY ===
 
-After reading the above session memory, briefly acknowledge to the user
-what you remember about the session (2-3 sentences summarizing the goal
-and current state). This confirms the memory injection worked and helps
-the user trust that context was preserved across the compaction.
+IMPORTANT: Show the user what you retained from this session memory.
+Use this format:
+
+**Session Recharge — here's what I remember:**
+- **Goal:** [one sentence summary of the session objective]
+- **Where we left off:** [current state — what's done, what's next]
+- **Blockers:** [any active problems, or "None"]
+- **Corrections to remember:** [things the user corrected or said NOT to do, or "None noted"]
+
+This lets the user verify that the right context survived compaction.
+If anything looks wrong, the user can correct it immediately.
 FOOTER
 
 log "Injection complete"

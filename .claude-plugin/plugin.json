@@ -1,6 +1,6 @@
 {
   "name": "session-recharge",
-  "description": "Survives context compaction by extracting structured session memory before compact and re-injecting it after. Uses Haiku to capture goals, decisions, state, blockers, and user preferences so Claude never loses the plot in long sessions.",
+  "description": "Preserves important architectural decisions and user requests that get lost during compaction and long sessions. Automatically extracts structured session memory before compaction and re-injects it after. Can also be triggered mid-session anytime you want Claude to refocus on what's been decided.",
   "version": "1.0.0",
   "author": {
     "name": "Edo Ceder"
