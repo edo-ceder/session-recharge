@@ -52,7 +52,7 @@ mkdir -p "$MEMORY_DIR"
 # ---------------------------------------------------------------------------
 
 log() {
-  if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE")" -gt "$MAX_LOG_BYTES" ]; then
+  if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" | tr -d ' ')" -gt "$MAX_LOG_BYTES" ]; then
     mv "$LOG_FILE" "${LOG_FILE}.1"
   fi
   printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >> "$LOG_FILE"

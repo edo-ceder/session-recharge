@@ -56,7 +56,7 @@ mkdir -p "$MEMORY_DIR"
 log() {
   # Rotate log if it exceeds size limit to prevent unbounded disk growth.
   # Keeps one backup (.1) so recent history is preserved for debugging.
-  if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE")" -gt "$MAX_LOG_BYTES" ]; then
+  if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" | tr -d ' ')" -gt "$MAX_LOG_BYTES" ]; then
     mv "$LOG_FILE" "${LOG_FILE}.1"
   fi
   printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >> "$LOG_FILE"
@@ -366,7 +366,10 @@ RESULT=$(env -u CLAUDECODE "$CLAUDE_BIN" -p \
   --no-session-persistence \
   < "$PROMPT_FILE" 2>>"$LOG_FILE") || CLAUDE_EXIT=$?
 
-log "claude -p exited with code $CLAUDE_EXIT, returned ${#RESULT} chars"
+if [ "$CLAUDE_EXIT" -ne 0 ]; then
+  log "ERROR: claude -p failed with exit code $CLAUDE_EXIT"
+fi
+log "claude -p returned ${#RESULT} chars"
 
 # ---------------------------------------------------------------------------
 # Validate and save result

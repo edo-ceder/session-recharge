@@ -92,24 +92,22 @@ Each extraction only sends **new messages since the last extraction** — user p
 
 ## Installation
 
-In Claude Code, run:
-
-```
-/plugin marketplace add edo-ceder/session-recharge
-/plugin install session-recharge
-```
-
-That's it. Hooks and the `/session-recharge` command are active immediately.
-
-<details>
-<summary>Manual install (if not using the plugin system)</summary>
-
 ```bash
 git clone https://github.com/edo-ceder/session-recharge.git
 cd session-recharge && ./install.sh
 ```
 
-The installer copies hooks and the command to `~/.claude/` and merges hook config into your `settings.json`.
+The installer copies hooks and the command to `~/.claude/` and merges hook config into your `settings.json`. No reload required — hooks are active immediately.
+
+<details>
+<summary>Plugin marketplace (pending approval)</summary>
+
+Once approved by Anthropic, installation will be:
+
+```
+/plugin marketplace add edo-ceder/session-recharge
+/plugin install session-recharge
+```
 </details>
 
 ### Requirements
