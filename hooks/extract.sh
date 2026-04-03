@@ -173,7 +173,7 @@ EXISTING_MEMORY=""
 LAST_LINE=0
 if [ -f "$MEMORY_FILE" ]; then
   EXISTING_MEMORY=$(cat "$MEMORY_FILE")
-  LAST_LINE=$(sed -n 's/<!-- LastLine: \([0-9]*\) -->/\1/p' "$MEMORY_FILE")
+  LAST_LINE=$(sed -n 's/<!-- LastLine: \([0-9]*\) -->/\1/p' "$MEMORY_FILE" | tail -1)
   LAST_LINE="${LAST_LINE:-0}"
   log "Loaded existing memory ($(printf '%s' "$EXISTING_MEMORY" | wc -c | tr -d ' ') chars, last line: $LAST_LINE)"
 fi

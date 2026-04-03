@@ -45,6 +45,8 @@ MEMORY_DIR="$HOME/.claude/session-memories"
 LOG_FILE="$MEMORY_DIR/debug.log"
 MAX_LOG_BYTES=1048576  # 1 MiB
 
+mkdir -p "$MEMORY_DIR"
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
