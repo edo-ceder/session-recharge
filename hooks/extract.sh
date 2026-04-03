@@ -256,7 +256,7 @@ with open(sys.argv[1]) as f:
             lines.append(f'{role}: {text}')
 
 print('\n---\n'.join(lines))
-" "$TRANSCRIPT_PATH" "$LAST_LINE" "$MAX_BLOCK_CHARS" 2>/dev/null)
+" "$TRANSCRIPT_PATH" "$LAST_LINE" "$MAX_BLOCK_CHARS" 2>>"$LOG_FILE")
 
 # Record the transcript line count as a watermark for the next extraction
 TOTAL_LINES=$(wc -l < "$TRANSCRIPT_PATH" | tr -d ' ')
